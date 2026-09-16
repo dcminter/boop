@@ -26,6 +26,10 @@ pub fn run(action: Action, detach_key: u8) -> Result<i32, String> {
             attach(stream, &session, detach_key, "attached to")
         }
         Action::Disconnect { session } => {
+            let session = match session {
+                Some(session) => session,
+                None => current_session()?,
+            };
             disconnect(&session)?;
             report(&format!("disconnected terminals from session {session}"));
             Ok(0)
@@ -91,6 +95,13 @@ fn refuse_nesting(session: &str) -> Result<(), String> {
     match std::env::var("BOOP_SESSION") {
         Ok(current) if current == session => Err(format!("already inside session {session}")),
         _ => Ok(()),
+    }
+}
+
+fn current_session() -> Result<String, String> {
+    match std::env::var("BOOP_SESSION") {
+        Ok(current) => cli::session_name(current).map_err(|error| format!("BOOP_SESSION: {error}")),
+        Err(_) => Err("not inside a session; name one with --disconnect NAME".into()),
     }
 }
 

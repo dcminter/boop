@@ -11,9 +11,11 @@ Boop detaches a program from its terminal so that one or more terminals can atta
 | `boop --session NAME [COMMAND...]` | Attach to session `NAME`, or start it |
 | `boop --name NAME` | Attach to session `NAME` |
 | `boop --disconnect NAME` | Detach every terminal from session `NAME` |
+| `boop --disconnect` | Detach every terminal from the current session |
 | `boop --list` | List sessions |
 
-Press Ctrl-\ to detach. `--detach-key ^X` or `BOOP_DETACH_KEY=^X` selects another key.
+Press Ctrl-\ to detach, or run `boop --disconnect` inside the session.
+`--detach-key ^X` or `BOOP_DETACH_KEY=^X` selects another key.
 
 A session ends when its command exits; `boop` then exits with the command's status.
 Programs in a session see `BOOP_SESSION` set to the session name.

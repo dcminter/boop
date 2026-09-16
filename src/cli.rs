@@ -14,7 +14,7 @@ pub enum Action {
         session: String,
     },
     Disconnect {
-        session: String,
+        session: Option<String>,
     },
     List,
     Help,
@@ -30,12 +30,14 @@ pub struct Options {
 pub const USAGE: &str = "\
 Usage: boop [--session NAME] [--detach-key KEY] [COMMAND [ARG...]]
        boop --name NAME [--detach-key KEY]
-       boop --disconnect NAME
+       boop --disconnect [NAME]
        boop --list
 
   -s, --session NAME     attach to or create session NAME
   -n, --name NAME        attach to existing session NAME
-  -d, --disconnect NAME  detach all clients of session NAME
+  -d, --disconnect [NAME]
+                         detach all clients of session NAME,
+                         or of the current session
   -l, --list             list sessions
   -k, --detach-key KEY   detach key, written ^X (default ^\\)
   -h, --help             show this help
@@ -49,7 +51,7 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
     let mut list = false;
     let mut detach_key = None;
     let mut command = Vec::new();
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
 
     while let Some(arg) = args.next() {
         let Some(text) = arg.to_str() else {
@@ -79,7 +81,15 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
         match flag {
             "-s" | "--session" => session = Some(session_name(value(flag)?)?),
             "-n" | "--name" => name = Some(session_name(value(flag)?)?),
-            "-d" | "--disconnect" => disconnect = Some(session_name(value(flag)?)?),
+            "-d" | "--disconnect" => {
+                let name = match inline.clone() {
+                    Some(name) => Some(name),
+                    None => args
+                        .next_if(is_operand)
+                        .and_then(|name| name.into_string().ok()),
+                };
+                disconnect = Some(name.map(session_name).transpose()?);
+            }
             "-k" | "--detach-key" => detach_key = Some(parse_key(&value(flag)?)?),
             "-l" | "--list" => list = true,
             "-h" | "--help" => return Ok(simple(Action::Help)),
@@ -129,6 +139,10 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
         }
     };
     Ok(Options { action, detach_key })
+}
+
+fn is_operand(arg: &OsString) -> bool {
+    arg.to_str().is_some_and(|text| !text.starts_with('-'))
 }
 
 fn simple(action: Action) -> Options {
@@ -193,6 +207,12 @@ mod tests {
         }
     }
 
+    fn disconnect(session: Option<&str>) -> Action {
+        Action::Disconnect {
+            session: session.map(String::from),
+        }
+    }
+
     #[test]
     fn bare_invocation_is_auto() {
         assert_eq!(action(&[]), Action::Auto);
@@ -237,16 +257,36 @@ mod tests {
 
     #[test]
     fn disconnect_and_list() {
-        assert_eq!(
-            action(&["-d", "work"]),
-            Action::Disconnect {
-                session: "work".into()
-            }
-        );
+        assert_eq!(action(&["-d", "work"]), disconnect(Some("work")));
         assert_eq!(action(&["--list"]), Action::List);
         assert!(run(&["--list", "top"]).is_err());
         assert!(run(&["--list=x"]).is_err());
         assert!(run(&["--disconnect", "a", "top"]).is_err());
+    }
+
+    #[test]
+    fn disconnect_name_is_optional() {
+        assert_eq!(action(&["--disconnect"]), disconnect(None));
+        assert_eq!(action(&["-d"]), disconnect(None));
+        assert_eq!(action(&["--disconnect=work"]), disconnect(Some("work")));
+        assert_eq!(action(&["--disconnect", "work"]), disconnect(Some("work")));
+        assert_eq!(action(&["-d", "-k", "^A"]), disconnect(None));
+        assert_eq!(run(&["-d", "-k", "^A"]).unwrap().detach_key, 1);
+        assert_eq!(action(&["-d", "--"]), disconnect(None));
+        assert!(run(&["-d", "--", "work"]).is_err());
+        assert!(run(&["--disconnect="]).is_err());
+        assert!(run(&["--disconnect", "a/b"]).is_err());
+        assert!(run(&["-d", "--list"]).is_err());
+        assert!(run(&["-d", "-", "top"]).is_err());
+        assert!(run(&["-d", "--", "a", "b"]).is_err());
+        assert!(run(&["-d", "--session", "a"]).is_err());
+    }
+
+    #[test]
+    fn non_utf8_after_disconnect_is_refused() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = vec!["-d".into(), OsString::from_vec(vec![0xff])];
+        assert!(parse(args, None).is_err());
     }
 
     #[test]

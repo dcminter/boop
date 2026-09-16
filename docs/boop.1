@@ -15,7 +15,7 @@ boop \- detach a program from its terminal and reattach later
 .IR key ]
 .br
 .B boop \-\-disconnect
-.I name
+.RI [ name ]
 .br
 .B boop \-\-list
 .SH DESCRIPTION
@@ -66,9 +66,14 @@ or start it.
 Attach to the existing session
 .IR name .
 .TP
-.BR \-d ", " \-\-disconnect " \fIname\fR"
+.BR \-d ", " \-\-disconnect " [\fIname\fR]"
 Detach every terminal from session
-.IR name .
+.IR name ,
+or from the session named by
+.B BOOP_SESSION
+when
+.I name
+is absent.
 The session keeps running.
 .TP
 .BR \-l ", " \-\-list
@@ -102,6 +107,8 @@ is absent.
 Set to the session name for programs in a session.
 .B boop
 refuses to attach to the session it runs in.
+.B boop \-\-disconnect
+without a name detaches from it.
 .TP
 .B SHELL
 Command started when none is given.
@@ -130,3 +137,6 @@ in session
 .B boop \-\-disconnect mail
 Detach other terminals from
 .BR mail .
+.TP
+.B boop \-\-disconnect
+Detach from the current session without the detach key.

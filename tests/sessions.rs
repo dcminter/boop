@@ -756,7 +756,7 @@ fn help_version_and_usage_errors() {
     let env = Env::new("help_version_and_usage_errors");
     let help = env.run(&["--help"]);
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stdout).contains("--disconnect NAME"));
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--disconnect [NAME]"));
 
     let version = env.run(&["--version"]);
     assert!(version.status.success());
@@ -846,6 +846,67 @@ fn disconnect_is_reported() {
     assert!(output.stdout.is_empty());
     assert_eq!(first.wait(), 0);
     first.expect("[detached from t by boop --disconnect]");
+}
+
+#[test]
+fn disconnect_without_name_detaches_current_session() {
+    let env = Env::new("disconnect_without_name_detaches_current_session");
+    let mut first = env.terminal(&["--session", "t", "sh"]);
+    first.line("echo up-$((0+1))");
+    first.expect("up-1");
+    let mut second = env.terminal(&["--name", "t"]);
+    second.line("echo b-$((0+2))");
+    second.expect("b-2");
+    let mut other = env.terminal(&["--session", "u", "sh"]);
+    other.line("echo u-$((0+3))");
+    other.expect("u-3");
+
+    let binary = env!("CARGO_BIN_EXE_boop");
+    second.line(&format!(
+        "{binary} --disconnect > status 2>&1; echo $? >> status"
+    ));
+    first.wait_disconnected("t");
+    second.wait_disconnected("t");
+    env.wait_for_file("status");
+    wait_until(
+        || {
+            std::fs::read_to_string(env.work.join("status")).unwrap()
+                == "[disconnected terminals from session t]\n0\n"
+        },
+        "disconnect output",
+    );
+    assert_eq!(env.list(), ["t", "u"]);
+
+    other.line("echo still-$((3+1))");
+    other.expect("still-4");
+    other.line("exit");
+    assert_eq!(other.wait(), 0);
+}
+
+#[test]
+fn disconnect_without_name_outside_session_is_refused() {
+    let env = Env::new("disconnect_without_name_outside_session_is_refused");
+    let output = env.run(&["--disconnect"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("not inside a session"));
+
+    let output = env
+        .command(&["-d"])
+        .env("BOOP_SESSION", "a/b")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("BOOP_SESSION: invalid session name"));
+
+    let output = env
+        .command(&["-d"])
+        .env("BOOP_SESSION", "gone")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("no session named gone"));
 }
 
 #[test]
