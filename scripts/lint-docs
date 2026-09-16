@@ -1,0 +1,48 @@
+#!/bin/bash
+# Markdown style, man pages, comment length, forbidden words, and design-directory leakage.
+set -uo pipefail
+shopt -s nullglob
+cd "$(dirname "$0")/.." || exit 1
+status=0
+
+fail() {
+  echo "$1" >&2
+  status=1
+}
+
+if command -v mdl >/dev/null; then
+  mapfile -t docs < <(rg --files -g '*.md' --glob '!design/**' --glob '!CLAUDE.md')
+  [ ${#docs[@]} -eq 0 ] || mdl "${docs[@]}" || status=1
+else
+  echo "mdl absent: apt install markdownlint" >&2
+fi
+
+for page in docs/*.[1-8]; do
+  warnings="$(LC_ALL=C.UTF-8 MANWIDTH=80 man --warnings=w -E UTF-8 -l "$page" 2>&1 >/dev/null)"
+  [ -z "$warnings" ] || fail "$page: $warnings"
+done
+
+if rg -U -n --pcre2 '(?m)^[ \t]*//.*\n[ \t]*//' -t rust .; then
+  fail "a code comment spans more than one line"
+fi
+
+if rg -n --pcre2 '^[ \t]*//[/!]?.*[\w`)][.!?][ \t]+[A-Z]' -t rust .; then
+  fail "a code comment holds more than one sentence"
+fi
+
+mapfile -t script_dirs < <(find scripts .github -maxdepth 0 -type d 2>/dev/null)
+if rg -U -n --pcre2 '(?m)^[ \t]*#(?!!).*\n[ \t]*#' "${script_dirs[@]}"; then
+  fail "a script comment spans more than one line"
+fi
+
+if rg --pcre2 -n -i -f <(sed 's/.*/\\b&\\b/' scripts/forbidden-words.txt) \
+     --glob '!design/**' --glob '!scripts/forbidden-words.txt' --glob '!scripts/lint-docs' .; then
+  fail "forbidden words found"
+fi
+
+if rg -n '\bdesign/' --glob '!design/**' --glob '!scripts/lint-docs' \
+     --glob '!.gitignore' --glob '!CLAUDE.md' --glob '!.claude/**' .; then
+  fail "reference to the design directory found"
+fi
+
+exit $status

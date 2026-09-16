@@ -1,0 +1,52 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -qE 'design/design\\.md$' && { echo 'design/design.md is authoritative; ask the user before editing it.' >&2; exit 2; } || exit 0",
+            "statusMessage": "guarding the design document"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -q '\\.rs$' && cargo fmt || true",
+            "statusMessage": "cargo fmt"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -f Cargo.toml || exit 0; test -n \"$(git status --porcelain -- '*.rs' Cargo.toml Cargo.lock)\" || exit 0; cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test || exit 2",
+            "timeout": 600,
+            "statusMessage": "fmt + clippy + tests"
+          },
+          {
+            "type": "command",
+            "command": "test -n \"$(git status --porcelain -- '*.md' docs scripts .github src)\" || exit 0; ./scripts/lint-docs || exit 2",
+            "timeout": 120,
+            "statusMessage": "documentation lint"
+          },
+          {
+            "type": "command",
+            "command": "./.claude/hooks/doc-review",
+            "timeout": 30,
+            "statusMessage": "documentation review"
+          }
+        ]
+      }
+    ]
+  }
+}

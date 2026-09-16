@@ -1,0 +1,26 @@
+#!/bin/bash
+# Claude Code Stop hook asking for one documentation review per distinct set of changes.
+set -uo pipefail
+cd "$(dirname "$0")/../.." || exit 0
+
+paths=(README.md docs scripts .github src)
+fingerprint="$( { git diff HEAD -- "${paths[@]}"; git ls-files --others --exclude-standard -- "${paths[@]}" | xargs -r cat; } | sha256sum | cut -d' ' -f1)"
+clean="$(printf '' | sha256sum | cut -d' ' -f1)"
+record="$(git rev-parse --git-dir)/doc-review"
+
+if [ "$fingerprint" = "$clean" ] || [ "$fingerprint" = "$(cat "$record" 2>/dev/null)" ]; then
+  exit 0
+fi
+echo "$fingerprint" >"$record"
+if jq -e '.stop_hook_active' >/dev/null 2>&1; then
+  exit 0
+fi
+
+cat >&2 <<'MESSAGE'
+Before finishing, review the changed README.md, docs/ man pages, scripts and code comments against
+"Documentation considerations" in design/design.md: terse; describing only the current state, not
+how it changed; comments at most one short sentence, and none where naming would do; no
+implementation details in the README; no mention of the design directory. Fix what does not
+conform, run scripts/lint-docs, then finish.
+MESSAGE
+exit 2
