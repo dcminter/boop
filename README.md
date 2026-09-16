@@ -17,6 +17,7 @@ Press Ctrl-\ to detach. `--detach-key ^X` or `BOOP_DETACH_KEY=^X` selects anothe
 
 A session ends when its command exits; `boop` then exits with the command's status.
 Programs in a session see `BOOP_SESSION` set to the session name.
+`boop` names the session it starts, attaches to, detaches from, or sees end.
 
 See `man boop` for details.
 

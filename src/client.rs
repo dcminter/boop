@@ -23,9 +23,13 @@ pub fn run(action: Action, detach_key: u8) -> Result<i32, String> {
             let stream = sessions::connect(&session)
                 .map_err(describe)?
                 .ok_or_else(|| format!("no session named {session}"))?;
-            attach(stream, &session, detach_key)
+            attach(stream, &session, detach_key, "attached to")
         }
-        Action::Disconnect { session } => disconnect(&session),
+        Action::Disconnect { session } => {
+            disconnect(&session)?;
+            report(&format!("disconnected terminals from session {session}"));
+            Ok(0)
+        }
         Action::List => {
             for name in sessions::list().map_err(describe)? {
                 println!("{name}");
@@ -68,7 +72,7 @@ fn open(session: &str, command: Vec<OsString>, detach_key: u8) -> Result<i32, St
                 "session {session} already exists; name a new one with --session"
             ));
         }
-        return attach(stream, session, detach_key);
+        return attach(stream, session, detach_key, "attached to");
     }
     let (rows, cols) = sys::window_size(STDIN).unwrap_or(DEFAULT_SIZE);
     server::launch(Launch {
@@ -80,7 +84,7 @@ fn open(session: &str, command: Vec<OsString>, detach_key: u8) -> Result<i32, St
     let stream = sessions::connect(session)
         .map_err(describe)?
         .ok_or_else(|| format!("session {session} ended at once"))?;
-    attach(stream, session, detach_key)
+    attach(stream, session, detach_key, "started")
 }
 
 fn refuse_nesting(session: &str) -> Result<(), String> {
@@ -98,7 +102,7 @@ fn require_terminal() -> Result<(), String> {
     }
 }
 
-fn disconnect(session: &str) -> Result<i32, String> {
+fn disconnect(session: &str) -> Result<(), String> {
     let mut stream = sessions::connect(session)
         .map_err(describe)?
         .ok_or_else(|| format!("no session named {session}"))?;
@@ -110,8 +114,8 @@ fn disconnect(session: &str) -> Result<i32, String> {
     let mut buffer = [0u8; 4096];
     loop {
         match decoder.next_message()? {
-            Some(Message::Detached) => return Ok(0),
-            Some(Message::Error(text)) => return Err(text),
+            Some(Message::Detached) => return Ok(()),
+            Some(Message::Error(text)) => return Err(format!("session {session}: {text}")),
             Some(_) => continue,
             None => {}
         }
@@ -124,10 +128,20 @@ fn disconnect(session: &str) -> Result<i32, String> {
 
 enum Outcome {
     Detached,
+    Disconnected,
     Exited(i32),
 }
 
-fn attach(mut stream: UnixStream, session: &str, detach_key: u8) -> Result<i32, String> {
+fn report(message: &str) {
+    let _ = writeln!(io::stderr(), "[{message}]");
+}
+
+fn attach(
+    mut stream: UnixStream,
+    session: &str,
+    detach_key: u8,
+    verb: &str,
+) -> Result<i32, String> {
     require_terminal()?;
     let signals =
         sys::signal_pipe(&[libc::SIGWINCH, libc::SIGTERM, libc::SIGHUP]).map_err(describe)?;
@@ -139,19 +153,28 @@ fn attach(mut stream: UnixStream, session: &str, detach_key: u8) -> Result<i32, 
     };
     stream.write_all(&request.encode()).map_err(describe)?;
 
+    if let Ok(outer) = std::env::var("BOOP_SESSION") {
+        report(&format!("inside session {outer}"));
+    }
+    report(&format!(
+        "{verb} session {session}; detach with {}",
+        cli::key_name(detach_key)
+    ));
     let raw_mode = RawMode::enable(STDIN).map_err(describe)?;
     let mut tracker = ModeTracker::default();
     let result = relay(&mut stream, signals.as_raw_fd(), detach_key, &mut tracker);
     let _ = sys::write_all(STDOUT, &tracker.reset());
     drop(raw_mode);
 
-    match result? {
-        Outcome::Detached => {
-            let _ = writeln!(io::stderr(), "[detached from {session}]");
-            Ok(0)
+    match result.map_err(|error| format!("session {session}: {error}"))? {
+        Outcome::Detached => report(&format!("detached from {session}")),
+        Outcome::Disconnected => report(&format!("detached from {session} by boop --disconnect")),
+        Outcome::Exited(code) => {
+            report(&format!("session {session} ended with status {code}"));
+            return Ok(code);
         }
-        Outcome::Exited(code) => Ok(code),
     }
+    Ok(0)
 }
 
 fn relay(
@@ -189,10 +212,10 @@ fn relay(
             let count = match sys::read(socket, &mut buffer) {
                 Ok(count) => count,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
-                Err(error) => return Err(format!("lost connection to session: {error}")),
+                Err(error) => return Err(format!("lost connection: {error}")),
             };
             if count == 0 {
-                return Err("lost connection to session".into());
+                return Err("lost connection".into());
             }
             decoder.push(&buffer[..count]);
             while let Some(message) = decoder.next_message()? {
@@ -202,9 +225,9 @@ fn relay(
                         sys::write_all(STDOUT, &data).map_err(describe)?;
                     }
                     Message::Exit(code) => return Ok(Outcome::Exited(code)),
-                    Message::Detached => return Ok(Outcome::Detached),
+                    Message::Detached => return Ok(Outcome::Disconnected),
                     Message::Error(text) => return Err(text),
-                    _ => return Err("unexpected message from session".into()),
+                    _ => return Err("unexpected message".into()),
                 }
             }
         }

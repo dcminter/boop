@@ -265,6 +265,11 @@ impl Terminal {
         assert_eq!(self.wait(), 0);
     }
 
+    fn wait_disconnected(&mut self, session: &str) {
+        assert_eq!(self.wait(), 0);
+        self.expect(&format!("[detached from {session} by boop --disconnect]"));
+    }
+
     fn wait_detached(&mut self, session: &str) {
         assert_eq!(self.wait(), 0);
         self.expect(&format!("[detached from {session}]"));
@@ -471,8 +476,8 @@ fn disconnect_detaches_all_clients() {
 
     let output = env.run(&["--disconnect", "t"]);
     assert!(output.status.success(), "{output:?}");
-    first.wait_detached("t");
-    second.wait_detached("t");
+    first.wait_disconnected("t");
+    second.wait_disconnected("t");
     assert_eq!(env.list(), ["t"]);
 
     let mut third = env.terminal(&["--name", "t"]);
@@ -797,4 +802,80 @@ fn session_has_controlling_terminal() {
     terminal.expect("/dev/pts/");
     terminal.expect("term-xterm");
     assert_eq!(terminal.wait(), 0);
+}
+
+#[test]
+fn context_messages() {
+    let env = Env::new("context_messages");
+    let mut first = env.terminal(&["--session", "t", "sh"]);
+    first.expect("[started session t; detach with ^\\]");
+    first.line("echo up-$((0+1))");
+    first.expect("up-1");
+    first.detach();
+    first.expect("[detached from t]");
+
+    let mut second = env.terminal(&["--detach-key", "^a", "--name", "t"]);
+    second.expect("[attached to session t; detach with ^A]");
+    second.line("exit 4");
+    assert_eq!(second.wait(), 4);
+    second.expect("[session t ended with status 4]");
+}
+
+#[test]
+fn nested_context_is_reported() {
+    let env = Env::new("nested_context_is_reported");
+    let mut outer = env.terminal(&["--session", "outer", "sh"]);
+    let binary = env!("CARGO_BIN_EXE_boop");
+    outer.line(&format!("{binary} --session inner sh -c 'exit 2'"));
+    outer.expect("[inside session outer]");
+    outer.expect("[started session inner; detach with ^\\]");
+    outer.expect("[session inner ended with status 2]");
+    outer.line("exit 0");
+    assert_eq!(outer.wait(), 0);
+}
+
+#[test]
+fn disconnect_is_reported() {
+    let env = Env::new("disconnect_is_reported");
+    let mut first = env.terminal(&["--session", "t", "sh"]);
+    first.line("echo up-$((0+1))");
+    first.expect("up-1");
+    let output = env.run(&["--disconnect", "t"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(stderr(&output), "[disconnected terminals from session t]\n");
+    assert!(output.stdout.is_empty());
+    assert_eq!(first.wait(), 0);
+    first.expect("[detached from t by boop --disconnect]");
+}
+
+#[test]
+fn lost_connection_names_session() {
+    let env = Env::new("lost_connection_names_session");
+    let mut first = env.terminal(&["--session", "t", "sh"]);
+    first.line("echo pid-$$");
+    first.expect("pid-");
+    first.expect("pid-");
+    let text = first.text();
+    let pid: libc::pid_t = text
+        .rsplit("pid-")
+        .next()
+        .unwrap()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap();
+    let server = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .unwrap()
+        .rsplit(") ")
+        .next()
+        .unwrap()
+        .split(' ')
+        .nth(1)
+        .unwrap()
+        .parse::<libc::pid_t>()
+        .unwrap();
+    unsafe { libc::kill(server, libc::SIGKILL) };
+    assert_eq!(first.wait(), 1);
+    first.expect("boop: session t: lost connection");
 }

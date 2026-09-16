@@ -453,7 +453,7 @@ impl Server {
         let matches = version == protocol::VERSION;
         if !matches {
             self.clients[index].close_with(&Message::Error(format!(
-                "session speaks protocol {} but the client speaks {version}; restart the session",
+                "speaks protocol {} but the client speaks {version}; restart the session",
                 protocol::VERSION
             )));
         }

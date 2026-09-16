@@ -50,6 +50,11 @@ or 128 plus the signal number if a signal ended it.
 Attaching resizes the session to the terminal and signals the session as if resized.
 Mouse, colour and other terminal modes pass through unchanged,
 and are reset in the terminal on detach.
+.PP
+.B boop
+reports on standard error when it starts, attaches to, detaches from or loses a session,
+when the session ends,
+and when it attaches from inside another session.
 .SH OPTIONS
 .TP
 .BR \-s ", " \-\-session " \fIname\fR"

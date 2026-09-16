@@ -167,6 +167,13 @@ pub fn parse_key(text: &str) -> Result<u8, String> {
     }
 }
 
+pub fn key_name(key: u8) -> String {
+    match key {
+        0x7f => "^?".into(),
+        _ => format!("^{}", char::from(key & 0x1f | 0x40)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +294,17 @@ mod tests {
         assert!(parse_key("^1").is_err());
         assert!(parse_key("^ab").is_err());
         assert!(parse_key("\\").is_err());
+    }
+
+    #[test]
+    fn key_names() {
+        assert_eq!(key_name(0x1c), "^\\");
+        assert_eq!(key_name(0), "^@");
+        assert_eq!(key_name(1), "^A");
+        assert_eq!(key_name(0x1f), "^_");
+        assert_eq!(key_name(0x7f), "^?");
+        for text in ["^@", "^A", "^Z", "^[", "^\\", "^]", "^^", "^_", "^?"] {
+            assert_eq!(key_name(parse_key(text).unwrap()), text);
+        }
     }
 }
