@@ -1,0 +1,34 @@
+#!/bin/bash
+# Builds Debian packages for Debian Trixie and Ubuntu Noble and install-tests them.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+declare -A glibc=([trixie]=2.41 [noble]=2.39)
+declare -A image=([trixie]=debian:trixie [noble]=ubuntu:noble)
+
+cargo build --release
+needed="$(objdump -T target/release/boop | rg -o 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -uV | tail -n1)"
+
+rm -rf target/debian
+for release in trixie noble; do
+  if ! dpkg --compare-versions "$needed" le "${glibc[$release]}"; then
+    echo "binary needs glibc $needed; $release has ${glibc[$release]}" >&2
+    exit 1
+  fi
+  cargo deb --no-build --deb-revision "1~$release" --output "target/debian/$release/"
+done
+
+if ! docker info >/dev/null 2>&1; then
+  echo "docker unavailable: packages not install-tested" >&2
+  exit 0
+fi
+for release in trixie noble; do
+  deb="$(cd "target/debian/$release" && ls boop_*.deb)"
+  docker run --rm -v "$PWD/target/debian:/debs:ro" "${image[$release]}" sh -ec "
+    dpkg -i /debs/$release/$deb
+    boop --version
+    dpkg -L boop | grep -q /usr/share/man/man1/boop.1
+    echo 'boop: $release install ok'
+  "
+done
+ls target/debian/*/boop_*.deb

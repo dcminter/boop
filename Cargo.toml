@@ -2,5 +2,26 @@
 name = "boop"
 version = "0.1.0"
 edition = "2024"
+description = "Detach a program from its terminal and reattach later"
+license = "MIT"
 
 [dependencies]
+libc = "0.2.189"
+
+[profile.release]
+strip = true
+lto = true
+
+[package.metadata.deb]
+maintainer = "Dave Minter <dave@paperstack.com>"
+copyright = "2026, Dave Minter <dave@paperstack.com>"
+license-file = ["LICENSE", "0"]
+section = "utils"
+priority = "optional"
+extended-description = "Boop runs a program in a session that outlives the terminal, so one or more terminals can attach to it later."
+depends = "$auto"
+assets = [
+    ["target/release/boop", "usr/bin/", "755"],
+    ["docs/boop.1", "usr/share/man/man1/", "644"],
+    ["README.md", "usr/share/doc/boop/", "644"],
+]

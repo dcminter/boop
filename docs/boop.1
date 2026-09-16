@@ -1,0 +1,127 @@
+.TH BOOP 1 "September 2026" "boop 0.1.0" "User Commands"
+.SH NAME
+boop \- detach a program from its terminal and reattach later
+.SH SYNOPSIS
+.B boop
+.RB [ \-\-session
+.IR name ]
+.RB [ \-\-detach\-key
+.IR key ]
+.RI [ command " [" arg ...]]
+.br
+.B boop \-\-name
+.I name
+.RB [ \-\-detach\-key
+.IR key ]
+.br
+.B boop \-\-disconnect
+.I name
+.br
+.B boop \-\-list
+.SH DESCRIPTION
+.B boop
+runs a command in a session that outlives the terminal.
+Any number of terminals may attach to a session.
+Output goes to every attached terminal; input comes from any of them.
+.PP
+Without arguments,
+.B boop
+starts
+.B $SHELL
+in the session
+.B boop
+when no session runs,
+attaches to the session when one runs,
+and lists the sessions when several run.
+.PP
+With a
+.IR command ,
+.B boop
+starts it in the session
+.B boop
+or the session given by
+.BR \-\-session .
+The session must not exist.
+.PP
+A session ends when its command exits.
+Attached terminals then exit with the command's status,
+or 128 plus the signal number if a signal ended it.
+.PP
+Attaching resizes the session to the terminal and signals the session as if resized.
+Mouse, colour and other terminal modes pass through unchanged,
+and are reset in the terminal on detach.
+.SH OPTIONS
+.TP
+.BR \-s ", " \-\-session " \fIname\fR"
+Attach to session
+.IR name ,
+or start it.
+.TP
+.BR \-n ", " \-\-name " \fIname\fR"
+Attach to the existing session
+.IR name .
+.TP
+.BR \-d ", " \-\-disconnect " \fIname\fR"
+Detach every terminal from session
+.IR name .
+The session keeps running.
+.TP
+.BR \-l ", " \-\-list
+Print the name of each session.
+.TP
+.BR \-k ", " \-\-detach\-key " \fIkey\fR"
+Detach on
+.IR key ,
+written as a caret and a character, for example
+.BR ^A .
+The default is
+.BR ^\e .
+.TP
+.BR \-h ", " \-\-help
+Print usage.
+.TP
+.BR \-V ", " \-\-version
+Print the version.
+.PP
+Session names hold up to 64 letters, digits and the characters
+.B ._\-+@:
+and do not start with a dot.
+.SH ENVIRONMENT
+.TP
+.B BOOP_DETACH_KEY
+Detach key used when
+.B \-\-detach\-key
+is absent.
+.TP
+.B BOOP_SESSION
+Set to the session name for programs in a session.
+.B boop
+refuses to attach to the session it runs in.
+.TP
+.B SHELL
+Command started when none is given.
+Defaults to
+.BR /bin/sh .
+.TP
+.B XDG_RUNTIME_DIR
+Sessions live in
+.BR $XDG_RUNTIME_DIR/boop ,
+or in
+.BI /tmp/boop\- uid
+when unset.
+.SH EXIT STATUS
+0 on detach, the command's status when the session ends, and 1 on error.
+.SH EXAMPLES
+.TP
+.B boop
+Start or resume a shell.
+.TP
+.B boop \-\-session mail mutt
+Run
+.B mutt
+in session
+.BR mail .
+.TP
+.B boop \-\-disconnect mail
+Detach other terminals from
+.BR mail .
