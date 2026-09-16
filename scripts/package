@@ -1,16 +1,25 @@
 #!/bin/bash
-# Builds Debian packages for Debian Trixie and Ubuntu Noble and install-tests them.
+# Builds Debian packages and install-tests them: scripts/package [trixie|noble|jammy]...
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-declare -A glibc=([trixie]=2.41 [noble]=2.39)
-declare -A image=([trixie]=debian:trixie [noble]=ubuntu:noble)
+declare -A glibc=([trixie]=2.41 [noble]=2.39 [jammy]=2.35)
+declare -A image=([trixie]=debian:trixie [noble]=ubuntu:noble [jammy]=ubuntu:jammy)
 
-cargo build --release
+releases=("$@")
+[ ${#releases[@]} -gt 0 ] || releases=(trixie noble jammy)
+for release in "${releases[@]}"; do
+  if [ -z "${glibc[$release]:-}" ]; then
+    echo "package: unknown distribution '$release'; expected trixie, noble or jammy" >&2
+    exit 2
+  fi
+done
+
+cargo build --release --locked
 needed="$(objdump -T target/release/boop | rg -o 'GLIBC_[0-9.]+' | sed 's/GLIBC_//' | sort -uV | tail -n1)"
 
 rm -rf target/debian
-for release in trixie noble; do
+for release in "${releases[@]}"; do
   if ! dpkg --compare-versions "$needed" le "${glibc[$release]}"; then
     echo "binary needs glibc $needed; $release has ${glibc[$release]}" >&2
     exit 1
@@ -20,9 +29,10 @@ done
 
 if ! docker info >/dev/null 2>&1; then
   echo "docker unavailable: packages not install-tested" >&2
+  ls target/debian/*/boop_*.deb
   exit 0
 fi
-for release in trixie noble; do
+for release in "${releases[@]}"; do
   deb="$(cd "target/debian/$release" && ls boop_*.deb)"
   docker run --rm -v "$PWD/target/debian:/debs:ro" "${image[$release]}" sh -ec "
     dpkg -i /debs/$release/$deb

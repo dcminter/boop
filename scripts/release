@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Checks, then prompts for a version and description, then tags and pushes.
+
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$here"
+
+say() { printf '\n== %s\n' "$1"; }
+fail() { printf 'release: %s\n' "$1" >&2; exit 1; }
+
+confirm() {
+    local answer
+    read -r -p "$1 [y/N] " answer
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+[ -t 0 ] || fail "this script asks questions, so it needs a terminal"
+command -v git >/dev/null || fail "git is not on PATH"
+command -v gh >/dev/null || echo "release: gh is not here; the release notes will have to be added by hand" >&2
+
+say "Checking the working tree"
+[ -z "$(git status --porcelain)" ] || fail "there are uncommitted changes; commit or stash them first"
+branch="$(git rev-parse --abbrev-ref HEAD)"
+[ "$branch" = "main" ] || confirm "You are on '$branch', not main. Continue?" || exit 1
+
+say "Running the tests"
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+./scripts/lint-docs
+
+# The workflow has no interactive terminal, so that is checked by hand here.
+say "Local checks the workflow cannot do"
+cat <<'NOTICE'
+The workflow runs the tests, and nothing that needs a person at a terminal.
+Before cutting a release, these are worth doing by hand:
+
+  boop --session release-check     then press Ctrl-\ to detach
+  boop --list
+  boop --name release-check        from a second terminal as well
+  boop --disconnect release-check  from a third terminal
+  boop --name release-check        then run: boop --disconnect
+  boop --name release-check        then run: exit
+
+NOTICE
+confirm "Have those been run?" || fail "do that first"
+
+current="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "boop") | .version')"
+say "The version is currently $current"
+read -r -p "Version for this release: " version
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "'$version' is not a major.minor.patch version"
+tag="v$version"
+git rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "$tag already exists"
+
+say "Release notes"
+echo "Write what changed. An empty file cancels the release."
+notes="$(mktemp)"
+trap 'rm -f "$notes"' EXIT
+{
+    echo "# Release $version"
+    echo "#"
+    echo "# Lines beginning with # are ignored. Everything else becomes the"
+    echo "# release description on GitHub."
+    echo
+    git log --pretty='# - %s' "$(git describe --tags --abbrev=0 2>/dev/null || echo HEAD)..HEAD" 2>/dev/null || true
+} >"$notes"
+"${EDITOR:-nano}" "$notes"
+description="$(grep -v '^#' "$notes" | sed '/^[[:space:]]*$/d' || true)"
+[ -n "$description" ] || fail "the description is empty, so nothing was released"
+
+if [ "$current" != "$version" ]; then
+    say "Setting the version to $version"
+    sed -i "0,/^version = \"$current\"/s//version = \"$version\"/" Cargo.toml
+    cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace
+    git add Cargo.toml Cargo.lock
+    git commit -m "Release $version"
+fi
+
+say "About to tag and push"
+echo "  tag:     $tag"
+echo "  branch:  $branch"
+echo
+echo "$description" | sed 's/^/  /'
+echo
+confirm "Push this? It starts the release workflow." || fail "nothing was pushed"
+
+git tag -a "$tag" -m "Release $version"
+git push origin "$branch"
+git push origin "$tag"
+
+say "Pushed"
+if command -v gh >/dev/null; then
+    echo "$description" | gh release create "$tag" --title "$version" --notes-file - --draft
+    echo "A draft release is waiting. The workflow attaches the packages to it."
+    echo "Publish it once they are there:  gh release edit $tag --draft=false"
+else
+    echo "Add the release notes at the repository's releases page."
+fi

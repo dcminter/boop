@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the build environment
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git jq ripgrep man-db markdownlint
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable --component clippy,rustfmt
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      - name: Check the tag matches the crate version
+        run: |
+          echo "$GITHUB_REF_NAME" | grep -qxE 'v[0-9]+\.[0-9]+\.[0-9]+'
+          crate="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "boop") | .version')"
+          [ "v$crate" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME, crate $crate" >&2; exit 1; }
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+      - name: Documentation
+        run: ./scripts/lint-docs
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing distribution should not hide the state of the other.
+      fail-fast: false
+      matrix:
+        include:
+          - distribution: trixie
+            container: debian:trixie
+          - distribution: noble
+            container: ubuntu:24.04
+          - distribution: jammy
+            container: ubuntu:22.04
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install the build environment
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git ripgrep
+      - uses: actions/checkout@v4
+      - name: Install the toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >>"$GITHUB_PATH"
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build the package
+        # Building inside the distribution links against its own glibc.
+        run: ./scripts/package "${{ matrix.distribution }}"
+      - name: Check it installs
+        # Installing the package also resolves its dependencies.
+        run: |
+          apt-get install -y ./target/debian/${{ matrix.distribution }}/boop_*.deb
+          boop --version
+          dpkg -L boop | grep -qx /usr/share/man/man1/boop.1.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boop-${{ matrix.distribution }}
+          path: target/debian/${{ matrix.distribution }}/boop_*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - name: Attach the packages to the release
+        # Adds to the draft release that scripts/release created, or creates one.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" packages/*.deb --clobber \
+            --repo "$GITHUB_REPOSITORY" \
+            || gh release create "$GITHUB_REF_NAME" packages/*.deb \
+                 --repo "$GITHUB_REPOSITORY" \
+                 --title "${GITHUB_REF_NAME#v}" \
+                 --generate-notes --draft
