@@ -544,6 +544,65 @@ fn command_for_existing_session_is_refused() {
 }
 
 #[test]
+fn status_outside_session_fails() {
+    let env = Env::new("status_outside_session_fails");
+    let output = env.run(&["--status"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(stderr(&output).contains("not inside a session"));
+    assert!(!stderr(&output).contains("--disconnect"));
+    assert!(env.list().is_empty());
+}
+
+#[test]
+fn status_inside_session_prints_name() {
+    let env = Env::new("status_inside_session_prints_name");
+    let mut terminal = env.terminal(&["--session", "work", "sh"]);
+    let binary = env!("CARGO_BIN_EXE_boop");
+    terminal.line(&format!("echo [$({binary} --status)] status-$?"));
+    terminal.expect("[work] status-0");
+    terminal.line(&format!("{binary} -t >/dev/null && echo inside-$((0+1))"));
+    terminal.expect("inside-1");
+    terminal.line("exit");
+    assert_eq!(terminal.wait(), 0);
+}
+
+#[test]
+fn status_for_ended_session_fails() {
+    let env = Env::new("status_for_ended_session_fails");
+    let output = env
+        .command(&["--status"])
+        .env("BOOP_SESSION", "gone")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(stderr(&output).contains("session gone is not running"));
+}
+
+#[test]
+fn status_with_invalid_session_variable_fails() {
+    let env = Env::new("status_with_invalid_session_variable_fails");
+    let output = env
+        .command(&["--status"])
+        .env("BOOP_SESSION", "a/b")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("BOOP_SESSION: invalid session name"));
+}
+
+#[test]
+fn disconnect_outside_session_suggests_name() {
+    let env = Env::new("disconnect_outside_session_suggests_name");
+    let output = env.run(&["--disconnect"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("not inside a session; name one with --disconnect NAME"));
+}
+
+#[test]
 fn nesting_is_refused() {
     let env = Env::new("nesting_is_refused");
     let mut terminal = env.terminal(&["--session", "t", "sh"]);

@@ -18,6 +18,8 @@ boop \- detach a program from its terminal and reattach later
 .RI [ name ]
 .br
 .B boop \-\-list
+.br
+.B boop \-\-status
 .SH DESCRIPTION
 .B boop
 runs a command in a session that outlives the terminal.
@@ -79,6 +81,12 @@ The session keeps running.
 .BR \-l ", " \-\-list
 Print the name of each session.
 .TP
+.BR \-t ", " \-\-status
+Print the session named by
+.B BOOP_SESSION
+and exit 0 when it runs;
+exit 1 otherwise.
+.TP
 .BR \-k ", " \-\-detach\-key " \fIkey\fR"
 Detach on
 .IR key ,
@@ -109,6 +117,8 @@ Set to the session name for programs in a session.
 refuses to attach to the session it runs in.
 .B boop \-\-disconnect
 without a name detaches from it.
+.B boop \-\-status
+prints it.
 .TP
 .B SHELL
 Command started when none is given.
@@ -140,3 +150,6 @@ Detach other terminals from
 .TP
 .B boop \-\-disconnect
 Detach from the current session without the detach key.
+.TP
+.B boop \-\-status || boop
+Start or resume a shell only when outside a session.

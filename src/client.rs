@@ -28,7 +28,8 @@ pub fn run(action: Action, detach_key: u8) -> Result<i32, String> {
         Action::Disconnect { session } => {
             let session = match session {
                 Some(session) => session,
-                None => current_session()?,
+                None => current_session()
+                    .map_err(|error| format!("{error}; name one with --disconnect NAME"))?,
             };
             disconnect(&session)?;
             report(&format!("disconnected terminals from session {session}"));
@@ -38,6 +39,14 @@ pub fn run(action: Action, detach_key: u8) -> Result<i32, String> {
             for name in sessions::list().map_err(describe)? {
                 println!("{name}");
             }
+            Ok(0)
+        }
+        Action::Status => {
+            let session = current_session()?;
+            if sessions::connect(&session).map_err(describe)?.is_none() {
+                return Err(format!("session {session} is not running"));
+            }
+            println!("{session}");
             Ok(0)
         }
         Action::Help => {
@@ -101,7 +110,7 @@ fn refuse_nesting(session: &str) -> Result<(), String> {
 fn current_session() -> Result<String, String> {
     match std::env::var("BOOP_SESSION") {
         Ok(current) => cli::session_name(current).map_err(|error| format!("BOOP_SESSION: {error}")),
-        Err(_) => Err("not inside a session; name one with --disconnect NAME".into()),
+        Err(_) => Err("not inside a session".into()),
     }
 }
 

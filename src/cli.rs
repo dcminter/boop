@@ -17,6 +17,7 @@ pub enum Action {
         session: Option<String>,
     },
     List,
+    Status,
     Help,
     Version,
 }
@@ -32,6 +33,7 @@ Usage: boop [--session NAME] [--detach-key KEY] [COMMAND [ARG...]]
        boop --name NAME [--detach-key KEY]
        boop --disconnect [NAME]
        boop --list
+       boop --status
 
   -s, --session NAME     attach to or create session NAME
   -n, --name NAME        attach to existing session NAME
@@ -39,6 +41,7 @@ Usage: boop [--session NAME] [--detach-key KEY] [COMMAND [ARG...]]
                          detach all clients of session NAME,
                          or of the current session
   -l, --list             list sessions
+  -t, --status           print the current session, if any
   -k, --detach-key KEY   detach key, written ^X (default ^\\)
   -h, --help             show this help
   -V, --version          show the version
@@ -49,6 +52,7 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
     let mut name = None;
     let mut disconnect = None;
     let mut list = false;
+    let mut status = false;
     let mut detach_key = None;
     let mut command = Vec::new();
     let mut args = args.into_iter().peekable();
@@ -92,11 +96,12 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
             }
             "-k" | "--detach-key" => detach_key = Some(parse_key(&value(flag)?)?),
             "-l" | "--list" => list = true,
+            "-t" | "--status" => status = true,
             "-h" | "--help" => return Ok(simple(Action::Help)),
             "-V" | "--version" => return Ok(simple(Action::Version)),
             _ => return Err(format!("unknown option {text}")),
         }
-        if inline.is_some() && matches!(flag, "--list") {
+        if inline.is_some() && matches!(flag, "--list" | "--status") {
             return Err(format!("{flag} takes no value"));
         }
     }
@@ -115,11 +120,12 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
         name.is_some(),
         disconnect.is_some(),
         list,
+        status,
     ];
     if chosen.iter().filter(|&&set| set).count() > 1 {
-        return Err("--session, --name, --disconnect and --list are exclusive".into());
+        return Err("--session, --name, --disconnect, --list and --status are exclusive".into());
     }
-    let takes_command = name.is_none() && disconnect.is_none() && !list;
+    let takes_command = name.is_none() && disconnect.is_none() && !list && !status;
     if !command.is_empty() && !takes_command {
         return Err("a command is only accepted with --session or alone".into());
     }
@@ -128,6 +134,8 @@ pub fn parse(args: Vec<OsString>, env_detach_key: Option<&str>) -> Result<Option
         Action::Attach { session }
     } else if let Some(session) = disconnect {
         Action::Disconnect { session }
+    } else if status {
+        Action::Status
     } else if list {
         Action::List
     } else if session.is_none() && command.is_empty() {
@@ -287,6 +295,21 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
         let args = vec!["-d".into(), OsString::from_vec(vec![0xff])];
         assert!(parse(args, None).is_err());
+    }
+
+    #[test]
+    fn status_forms() {
+        assert_eq!(action(&["--status"]), Action::Status);
+        assert_eq!(action(&["-t"]), Action::Status);
+        assert_eq!(action(&["-t", "-k", "^A"]), Action::Status);
+        assert_eq!(action(&["status"]), open("boop", &["status"]));
+        assert_eq!(action(&["--", "--status"]), open("boop", &["--status"]));
+        assert!(run(&["--status=x"]).is_err());
+        assert!(run(&["--status", "top"]).is_err());
+        assert!(run(&["--status", "--list"]).is_err());
+        assert!(run(&["--status", "--name", "a"]).is_err());
+        assert!(run(&["--status", "--session", "a"]).is_err());
+        assert!(run(&["-d", "--status"]).is_err());
     }
 
     #[test]
